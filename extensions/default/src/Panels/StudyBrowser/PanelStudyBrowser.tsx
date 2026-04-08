@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useSyncExternalStore, useMemo } from 'react';
 import { useImageViewer } from '@ohif/ui-next';
 import { useSystem, utils } from '@ohif/core';
 import { useNavigate } from 'react-router-dom';
@@ -12,6 +12,16 @@ import { type TabsProps } from '@ohif/core/src/utils/createStudyBrowserTabs';
 const { sortStudyInstances, formatDate, createStudyBrowserTabs } = utils;
 
 const thumbnailNoImageModalities = ['SR', 'SEG', 'RTSTRUCT', 'RTPLAN', 'RTDOSE', 'DOC', 'PMAP'];
+
+// Helpers para suscribirse al store de progreso de carga de imágenes (extensión cornerstone)
+const _subscribeToImageProgress = (callback: () => void) => {
+  const store = (window as any).imageLoadProgressStore;
+  return store ? store.subscribe(callback) : () => {};
+};
+const _getImageProgressSnapshot = () => {
+  const store = (window as any).imageLoadProgressStore;
+  return store ? store.getState().progressBySeriesUID : {};
+};
 
 /**
  * Study Browser component that displays and manages studies and their display sets
@@ -117,41 +127,58 @@ function PanelStudyBrowser({
 
       fetchedStudiesRef.current.add(StudyInstanceUID);
 
-      // current study qido
-      const qidoForStudyUID = await dataSource.query.studies.search({
-        studyInstanceUid: StudyInstanceUID,
-      });
-
-      let qidoStudiesForPatient = qidoForStudyUID;
-
-      // try to fetch the prior studies based on the patientID if the
-      // server can respond.
       try {
-        qidoStudiesForPatient = await getStudiesForPatientByMRN(qidoForStudyUID);
-      } catch (error) {
-        console.warn(error);
-      }
+        // current study qido
+        const qidoForStudyUID = await dataSource.query.studies.search({
+          studyInstanceUid: StudyInstanceUID,
+        });
 
-      const mappedStudies = _mapDataSourceStudies(qidoStudiesForPatient);
-      const actuallyMappedStudies = mappedStudies.map(qidoStudy => {
-        return {
-          studyInstanceUid: qidoStudy.StudyInstanceUID,
-          date: formatDate(qidoStudy.StudyDate) || '',
-          description: qidoStudy.StudyDescription,
-          modalities: qidoStudy.ModalitiesInStudy,
-          numInstances: Number(qidoStudy.NumInstances),
-        };
-      });
+        let qidoStudiesForPatient = qidoForStudyUID;
 
-      setStudyDisplayList(prevArray => {
-        const ret = [...prevArray];
-        for (const study of actuallyMappedStudies) {
-          if (!prevArray.find(it => it.studyInstanceUid === study.studyInstanceUid)) {
-            ret.push(study);
-          }
+        // try to fetch the prior studies based on the patientID if the
+        // server can respond.
+        try {
+          qidoStudiesForPatient = await getStudiesForPatientByMRN(qidoForStudyUID);
+        } catch (error) {
+          console.warn(
+            `[PanelStudyBrowser] Error fetching prior studies for ${StudyInstanceUID}:`,
+            error
+          );
         }
-        return ret;
-      });
+
+        // Validate data before processing
+        if (!Array.isArray(qidoStudiesForPatient)) {
+          console.warn(
+            `[PanelStudyBrowser] Invalid response for study ${StudyInstanceUID}:`,
+            qidoStudiesForPatient
+          );
+          return;
+        }
+
+        const mappedStudies = _mapDataSourceStudies(qidoStudiesForPatient);
+        const actuallyMappedStudies = mappedStudies.map(qidoStudy => {
+          return {
+            studyInstanceUid: qidoStudy.StudyInstanceUID,
+            date: formatDate(qidoStudy.StudyDate) || '',
+            description: qidoStudy.StudyDescription,
+            modalities: qidoStudy.ModalitiesInStudy,
+            numInstances: Number(qidoStudy.NumInstances),
+          };
+        });
+
+        setStudyDisplayList(prevArray => {
+          const ret = [...prevArray];
+          for (const study of actuallyMappedStudies) {
+            if (!prevArray.find(it => it.studyInstanceUid === study.studyInstanceUid)) {
+              ret.push(study);
+            }
+          }
+          return ret;
+        });
+      } catch (error) {
+        console.error(`[PanelStudyBrowser] Error fetching study ${StudyInstanceUID}:`, error);
+        // Don't let one failed study block the entire loading
+      }
     }
 
     StudyInstanceUIDs.forEach(sid => fetchStudiesForPatient(sid));
@@ -183,30 +210,94 @@ function PanelStudyBrowser({
     }
 
     currentDisplaySets.forEach(async dSet => {
-      const newImageSrcEntry = {};
-      const displaySet = displaySetService.getDisplaySetByUID(dSet.displaySetInstanceUID);
-      const imageIds = dataSource.getImageIdsForDisplaySet(dSet);
-
-      const imageId = getImageIdForThumbnail(displaySet, imageIds);
-
-      // TODO: Is it okay that imageIds are not returned here for SR displaySets?
-      if (displaySet?.unsupported) {
+      // SKIP PR (Presentation State) and other problematic modalities
+      if (dSet.Modality === 'PR' || dSet.Modality === 'KO') {
+        console.warn(
+          `[PanelStudyBrowser] Skipping ${dSet.Modality} displaySet:`,
+          dSet.displaySetInstanceUID
+        );
+        // Mark as loaded to not block progress
+        setThumbnailImageSrcMap(prevState => ({
+          ...prevState,
+          [dSet.displaySetInstanceUID]: null,
+        }));
         return;
       }
-      // When the image arrives, render it and store the result in the thumbnailImgSrcMap
-      let { thumbnailSrc } = displaySet;
-      if (!thumbnailSrc && displaySet.getThumbnailSrc) {
-        thumbnailSrc = await displaySet.getThumbnailSrc({ getImageSrc });
-      }
-      if (!thumbnailSrc && imageId) {
-        const thumbnailSrc = await getImageSrc(imageId);
-        displaySet.thumbnailSrc = thumbnailSrc;
-      }
-      newImageSrcEntry[dSet.displaySetInstanceUID] = thumbnailSrc;
 
-      setThumbnailImageSrcMap(prevState => {
-        return { ...prevState, ...newImageSrcEntry };
-      });
+      try {
+        const newImageSrcEntry = {};
+        const displaySet = displaySetService.getDisplaySetByUID(dSet.displaySetInstanceUID);
+
+        // Validate displaySet exists
+        if (!displaySet) {
+          console.warn(`[PanelStudyBrowser] DisplaySet not found:`, dSet.displaySetInstanceUID);
+          return;
+        }
+
+        // Skip unsupported displaySets
+        if (displaySet?.unsupported) {
+          return;
+        }
+
+        let imageIds;
+        try {
+          imageIds = dataSource.getImageIdsForDisplaySet(dSet);
+        } catch (error) {
+          console.warn(
+            `[PanelStudyBrowser] Error getting imageIds for displaySet ${dSet.displaySetInstanceUID}:`,
+            error
+          );
+          // Mark as loaded to not block progress
+          setThumbnailImageSrcMap(prevState => ({
+            ...prevState,
+            [dSet.displaySetInstanceUID]: null,
+          }));
+          return;
+        }
+
+        const imageId = getImageIdForThumbnail(displaySet, imageIds);
+
+        // When the image arrives, render it and store the result in the thumbnailImgSrcMap
+        let { thumbnailSrc } = displaySet;
+        if (!thumbnailSrc && displaySet.getThumbnailSrc) {
+          try {
+            thumbnailSrc = await displaySet.getThumbnailSrc({ getImageSrc });
+          } catch (error) {
+            console.warn(
+              `[PanelStudyBrowser] Error getting thumbnailSrc for displaySet ${dSet.displaySetInstanceUID}:`,
+              error
+            );
+            thumbnailSrc = null;
+          }
+        }
+        if (!thumbnailSrc && imageId) {
+          try {
+            thumbnailSrc = await getImageSrc(imageId);
+            displaySet.thumbnailSrc = thumbnailSrc;
+          } catch (error) {
+            console.warn(
+              `[PanelStudyBrowser] Error fetching thumbnail for displaySet ${dSet.displaySetInstanceUID}:`,
+              error
+            );
+            thumbnailSrc = null;
+          }
+        }
+        newImageSrcEntry[dSet.displaySetInstanceUID] = thumbnailSrc;
+
+        setThumbnailImageSrcMap(prevState => {
+          return { ...prevState, ...newImageSrcEntry };
+        });
+      } catch (error) {
+        console.error(
+          `[PanelStudyBrowser] Unexpected error processing displaySet ${dSet.displaySetInstanceUID}:`,
+          error
+        );
+        // Mark as loaded to not block progress even on error
+        setThumbnailImageSrcMap(prevState => ({
+          ...prevState,
+          [dSet.displaySetInstanceUID]: null,
+        }));
+      }
     });
   }, [displaySetService, dataSource, getImageSrc, activeViewportId, hasLoadedViewports]);
 
@@ -250,37 +341,101 @@ function PanelStudyBrowser({
         const { displaySetsAdded, options } = data;
         displaySetsAdded.forEach(async dSet => {
           const displaySetInstanceUID = dSet.displaySetInstanceUID;
-          const newImageSrcEntry = {};
-          const displaySet = displaySetService.getDisplaySetByUID(displaySetInstanceUID);
-          if (displaySet?.unsupported) {
-            return;
-          }
-          if (options?.madeInClient) {
-            setJumpToDisplaySet(displaySetInstanceUID);
-          }
 
-          const imageIds = dataSource.getImageIdsForDisplaySet(displaySet);
-          const imageId = getImageIdForThumbnail(displaySet, imageIds);
-
-          // TODO: Is it okay that imageIds are not returned here for SR displaysets?
-          if (!imageId) {
+          // SKIP PR (Presentation State) and other problematic modalities
+          if (dSet.Modality === 'PR' || dSet.Modality === 'KO') {
+            console.warn(
+              `[PanelStudyBrowser] Skipping ${dSet.Modality} displaySet in subscription:`,
+              displaySetInstanceUID
+            );
+            setThumbnailImageSrcMap(prevState => ({
+              ...prevState,
+              [displaySetInstanceUID]: null,
+            }));
             return;
           }
 
-          // When the image arrives, render it and store the result in the thumbnailImgSrcMap
-          let { thumbnailSrc } = displaySet;
-          if (!thumbnailSrc && displaySet.getThumbnailSrc) {
-            thumbnailSrc = await displaySet.getThumbnailSrc({ getImageSrc });
-          }
-          if (!thumbnailSrc) {
-            thumbnailSrc = await getImageSrc(imageId);
-            displaySet.thumbnailSrc = thumbnailSrc;
-          }
-          newImageSrcEntry[displaySetInstanceUID] = thumbnailSrc;
+          try {
+            const newImageSrcEntry = {};
+            const displaySet = displaySetService.getDisplaySetByUID(displaySetInstanceUID);
 
-          setThumbnailImageSrcMap(prevState => {
-            return { ...prevState, ...newImageSrcEntry };
-          });
+            if (!displaySet) {
+              console.warn(
+                `[PanelStudyBrowser] DisplaySet not found in subscription:`,
+                displaySetInstanceUID
+              );
+              return;
+            }
+
+            if (displaySet?.unsupported) {
+              return;
+            }
+            if (options?.madeInClient) {
+              setJumpToDisplaySet(displaySetInstanceUID);
+            }
+
+            let imageIds;
+            try {
+              imageIds = dataSource.getImageIdsForDisplaySet(displaySet);
+            } catch (error) {
+              console.warn(
+                `[PanelStudyBrowser] Error getting imageIds in subscription for ${displaySetInstanceUID}:`,
+                error
+              );
+              setThumbnailImageSrcMap(prevState => ({
+                ...prevState,
+                [displaySetInstanceUID]: null,
+              }));
+              return;
+            }
+
+            const imageId = getImageIdForThumbnail(displaySet, imageIds);
+
+            // TODO: Is it okay that imageIds are not returned here for SR displaysets?
+            if (!imageId) {
+              return;
+            }
+
+            // When the image arrives, render it and store the result in the thumbnailImgSrcMap
+            let { thumbnailSrc } = displaySet;
+            if (!thumbnailSrc && displaySet.getThumbnailSrc) {
+              try {
+                thumbnailSrc = await displaySet.getThumbnailSrc({ getImageSrc });
+              } catch (error) {
+                console.warn(
+                  `[PanelStudyBrowser] Error getting thumbnailSrc in subscription for ${displaySetInstanceUID}:`,
+                  error
+                );
+                thumbnailSrc = null;
+              }
+            }
+            if (!thumbnailSrc) {
+              try {
+                thumbnailSrc = await getImageSrc(imageId);
+                displaySet.thumbnailSrc = thumbnailSrc;
+              } catch (error) {
+                console.warn(
+                  `[PanelStudyBrowser] Error fetching thumbnail in subscription for ${displaySetInstanceUID}:`,
+                  error
+                );
+                thumbnailSrc = null;
+              }
+            }
+            newImageSrcEntry[displaySetInstanceUID] = thumbnailSrc;
+
+            setThumbnailImageSrcMap(prevState => {
+              return { ...prevState, ...newImageSrcEntry };
+            });
+          } catch (error) {
+            console.error(
+              `[PanelStudyBrowser] Unexpected error in subscription for ${displaySetInstanceUID}:`,
+              error
+            );
+            setThumbnailImageSrcMap(prevState => ({
+              ...prevState,
+              [displaySetInstanceUID]: null,
+            }));
+          }
         });
       }
     );
@@ -399,6 +554,54 @@ function PanelStudyBrowser({
 
   const activeDisplaySetInstanceUIDs = viewports.get(activeViewportId)?.displaySetInstanceUIDs;
 
+  // Progreso real de carga de imágenes DICOM por serie (desde el store de la extensión cornerstone)
+  const progressBySeriesUID = useSyncExternalStore(
+    _subscribeToImageProgress,
+    _getImageProgressSnapshot
+  );
+
+  const { loadingProgress, isLoading, loadedFrames, totalFrames } = useMemo(() => {
+    const imagingDisplaySets = displaySets.filter(
+      ds => !thumbnailNoImageModalities.includes(ds.modality)
+    );
+
+    let total = 0;
+    let loaded = 0;
+    let hasAnyProgress = false;
+
+    imagingDisplaySets.forEach(ds => {
+      const seriesUID = ds.SeriesInstanceUID;
+      const progress = seriesUID ? progressBySeriesUID[seriesUID] : null;
+      if (progress && progress.total > 0) {
+        total += progress.total;
+        loaded += progress.loaded + progress.failed;
+        hasAnyProgress = true;
+      }
+    });
+
+    // Fallback a conteo de thumbnails si el store aún no tiene datos
+    if (!hasAnyProgress) {
+      const totalDS = imagingDisplaySets.length;
+      const loadedDS = imagingDisplaySets.filter(
+        ds => thumbnailImageSrcMap[ds.displaySetInstanceUID] !== undefined
+      ).length;
+      return {
+        loadingProgress: totalDS > 0 ? Math.round((loadedDS / totalDS) * 100) : 0,
+        isLoading: totalDS > 0 && loadedDS < totalDS,
+        loadedFrames: loadedDS,
+        totalFrames: totalDS,
+      };
+    }
+
+    const progress = total > 0 ? Math.round((loaded / total) * 100) : 0;
+    return {
+      loadingProgress: progress,
+      isLoading: total > 0 && loaded < total,
+      loadedFrames: loaded,
+      totalFrames: total,
+    };
+  }, [displaySets, progressBySeriesUID, thumbnailImageSrcMap]);
+
   return (
     <>
       <>
@@ -414,6 +617,87 @@ function PanelStudyBrowser({
           thickness="2px"
         />
       </>
+
+      {/* INDICADOR DE PROGRESO DE CARGA */}
+      {isLoading && (
+        <div
+          className="loading-progress-indicator"
+          style={{
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            color: 'white',
+            padding: '10px 16px',
+            margin: '8px',
+            borderRadius: '8px',
+            fontSize: '13px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            position: 'relative',
+            zIndex: 100,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '6px',
+              fontWeight: 600,
+            }}
+          >
+            <span>Cargando imágenes...</span>
+            <span>
+              {loadedFrames}/{totalFrames}
+            </span>
+          </div>
+          <div
+            style={{
+              width: '100%',
+              height: '6px',
+              background: 'rgba(255,255,255,0.3)',
+              borderRadius: '3px',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                width: `${loadingProgress}%`,
+                height: '100%',
+                background: '#fff',
+                borderRadius: '3px',
+                transition: 'width 0.3s ease',
+                boxShadow: '0 0 10px rgba(255,255,255,0.5)',
+              }}
+            />
+          </div>
+          <div
+            style={{
+              textAlign: 'center',
+              marginTop: '4px',
+              fontSize: '11px',
+              opacity: 0.9,
+            }}
+          >
+            {loadingProgress}%
+          </div>
+        </div>
+      )}
+
+      {!isLoading && totalFrames > 0 && (
+        <div
+          className="loading-complete-indicator"
+          style={{
+            background: 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)',
+            color: 'white',
+            padding: '8px 16px',
+            margin: '8px',
+            borderRadius: '8px',
+            fontSize: '13px',
+            textAlign: 'center',
+            fontWeight: 600,
+          }}
+        >
+          {loadedFrames} de {totalFrames} imágenes cargadas
+        </div>
+      )}
 
       <StudyBrowser
         tabs={tabs}

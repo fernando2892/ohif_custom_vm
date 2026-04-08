@@ -301,7 +301,9 @@ const OHIFCornerstoneViewport = React.memo(
         );
       };
 
-      loadViewportData();
+      loadViewportData().catch(error => {
+        console.warn('Error loading viewport data:', error);
+      });
     }, [viewportOptions, displaySets, dataSource]);
 
     const Notification = customizationService.getCustomization('ui.notificationComponent');

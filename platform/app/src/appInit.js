@@ -84,6 +84,8 @@ async function appInit(appConfigOrFunc, defaultExtensions, defaultModes) {
     if (typeof appConfig.httpErrorHandler === 'function') {
       return appConfig.httpErrorHandler;
     }
+    // Retornar función vacía por defecto para evitar errores
+    return () => {};
   };
 
   /**

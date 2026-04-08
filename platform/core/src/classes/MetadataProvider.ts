@@ -9,6 +9,19 @@ import combineFrameInstance from '../utils/combineFrameInstance';
 
 const { calibratedPixelSpacingMetadataProvider, getPixelSpacingInformation } = utilities;
 
+// Bug en @cornerstonejs/core: ERMF=1 es válido (sin magnificación) pero
+// getPixelSpacingInformation llama console.error porque 1 > 1 === false
+// y 1 === true === false. Se suprime el mensaje ruidoso sin afectar el resultado
+// (la función devuelve el espaciado correcto de todas formas).
+const _csOrigConsoleError = console.error;
+console.error = (...args: unknown[]) => {
+  const msg = typeof args[0] === 'string' ? (args[0] as string) : '';
+  if (msg.includes('Illegal ERMF') || msg.includes('ERMF value')) {
+    return;
+  }
+  _csOrigConsoleError.apply(console, args);
+};
+
 class MetadataProvider {
   private readonly imageURIToUIDs: Map<string, any> = new Map();
   // Can be used to store custom metadata for a specific type.
@@ -556,7 +569,13 @@ const WADO_IMAGE_LOADER = {
     // Fallback for DX images.
     // TODO: We should use the rest of the results of this function
     // to update the UI somehow
-    const { PixelSpacing, type } = getPixelSpacingInformation(instance) || {};
+    let PixelSpacing;
+    let type;
+    try {
+      ({ PixelSpacing, type } = getPixelSpacingInformation(instance) || {});
+    } catch (e) {
+      // silently fail for invalid ERMF or other metadata errors
+    }
 
     let rowPixelSpacing;
     let columnPixelSpacing;

@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # Nginx Proxy OPTIMIZADO para 1Gbps
+  proxy:
+    image: nginx:alpine
+    container_name: ohif_proxy_fast
+    ports:
+      - '80:80'
+    volumes:
+      - ./nginx-fast.conf:/etc/nginx/nginx.conf:ro
+      - nginx_cache:/var/cache/nginx
+    depends_on:
+      - ohif
+    networks:
+      - ohif_network
+    restart: unless-stopped
+    # Límites elevados para alta velocidad
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    sysctls:
+      - net.core.somaxconn=65535
+      - net.ipv4.tcp_max_syn_backlog=65535
+    # Para 1Gbps: asignar más recursos
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  # OHIF Viewer
+  ohif:
+    image: ohif/app:latest
+    container_name: ohif_viewer_fast
+    environment:
+      - APP_CONFIG=config/viewmed_fast.js
+    volumes:
+      - ./platform/app/public/config/viewmed_fast.js:/usr/share/nginx/html/config/viewmed_fast.js:ro
+    networks:
+      - ohif_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+
+volumes:
+  nginx_cache:
+    driver: local
+
+networks:
+  ohif_network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 9000 # Jumbo frames para 1Gbps

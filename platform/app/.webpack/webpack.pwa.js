@@ -151,7 +151,19 @@ module.exports = (env, argv) => {
       open,
       port: OHIF_PORT,
       client: {
-        overlay: { errors: true, warnings: false },
+        overlay: {
+          errors: true,
+          warnings: false,
+          // Filtrar errores XHR de carga DICOM del overlay de desarrollo.
+          // Los rechazos del pool de imágenes de Cornerstone3D son manejados
+          // internamente por IMAGE_LOAD_FAILED events; no deben interrumpir la UI.
+          runtimeErrors: error => {
+            const msg = error?.message || String(error);
+            if (msg === '[object XMLHttpRequest]') return false;
+            if (msg.startsWith('[object XMLHttpRequest]')) return false;
+            return true;
+          },
+        },
       },
       proxy: [
         {

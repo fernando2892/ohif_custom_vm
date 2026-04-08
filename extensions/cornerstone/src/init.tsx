@@ -38,6 +38,7 @@ import { SegmentationRepresentations } from '@cornerstonejs/tools/enums';
 import { useLutPresentationStore } from './stores/useLutPresentationStore';
 import { usePositionPresentationStore } from './stores/usePositionPresentationStore';
 import { useSegmentationPresentationStore } from './stores/useSegmentationPresentationStore';
+import { useImageLoadProgressStore } from './stores/useImageLoadProgressStore';
 import { imageRetrieveMetadataProvider } from '@cornerstonejs/core/utilities';
 import { initializeWebWorkerProgressHandler } from './utils/initWebWorkerProgressHandler';
 
@@ -46,6 +47,7 @@ const { registerColormap } = csUtilities.colormap;
 // TODO: Cypress tests are currently grabbing this from the window?
 (window as any).cornerstone = cornerstone;
 (window as any).cornerstoneTools = cornerstoneTools;
+(window as any).imageLoadProgressStore = useImageLoadProgressStore;
 /**
  *
  */
@@ -258,11 +260,61 @@ export default async function init({
    */
   const imageLoadFailedHandler = ({ detail }) => {
     const handler = errorHandler.getHTTPErrorHandler();
-    handler(detail.error);
+    if (typeof handler === 'function') {
+      handler(detail.error);
+    }
   };
 
   eventTarget.addEventListener(EVENTS.IMAGE_LOAD_FAILED, imageLoadFailedHandler);
   eventTarget.addEventListener(EVENTS.IMAGE_LOAD_ERROR, imageLoadFailedHandler);
+
+  // Tracking de progreso real de carga de imágenes DICOM por serie
+  const { incrementLoaded, incrementFailed, setSeriesTotal } =
+    useImageLoadProgressStore.getState();
+
+  const imageLoadedHandler = ({ detail }) => {
+    const imageId = detail?.image?.imageId;
+    if (!imageId) {
+      return;
+    }
+    const seriesMeta = metaData.get('generalSeriesModule', imageId);
+    const seriesInstanceUID = seriesMeta?.seriesInstanceUID;
+    if (seriesInstanceUID) {
+      incrementLoaded(seriesInstanceUID);
+    }
+  };
+
+  const imageLoadProgressFailedHandler = ({ detail }) => {
+    const imageId = detail?.imageId;
+    if (!imageId) {
+      return;
+    }
+    const seriesMeta = metaData.get('generalSeriesModule', imageId);
+    const seriesInstanceUID = seriesMeta?.seriesInstanceUID;
+    if (seriesInstanceUID) {
+      incrementFailed(seriesInstanceUID);
+    }
+  };
+
+  eventTarget.addEventListener(EVENTS.IMAGE_LOADED, imageLoadedHandler);
+  eventTarget.addEventListener(EVENTS.IMAGE_LOAD_FAILED, imageLoadProgressFailedHandler);
+
+  // Al agregar nuevos displaySets, registrar el total de frames esperados por serie
+  displaySetService.subscribe(
+    displaySetService.EVENTS.DISPLAY_SETS_ADDED,
+    ({ displaySetsAdded }) => {
+      displaySetsAdded?.forEach(ds => {
+        const seriesInstanceUID = ds.SeriesInstanceUID;
+        if (!seriesInstanceUID) {
+          return;
+        }
+        const totalFrames = ds.numImageFrames ?? ds.images?.length ?? ds.instances?.length ?? 0;
+        if (totalFrames > 0) {
+          setSeriesTotal(seriesInstanceUID, totalFrames);
+        }
+      });
+    }
+  );
 
   const getDisplaySetFromVolumeId = (volumeId: string) => {
     const allDisplaySets = displaySetService.getActiveDisplaySets();

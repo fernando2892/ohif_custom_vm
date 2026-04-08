@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # OHIF Viewer - Construye desde el código fuente
+  ohif-viewer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - APP_CONFIG=config/viewmed.js
+        - PUBLIC_URL=/
+    image: us-east1-docker.pkg.dev/viewmed-web/viewmed-local-services/ohif-viewer:latest
+    container_name: ohif-viewer
+    ports:
+      - '3000:80'
+    depends_on:
+      - nginx-proxy
+    networks:
+      - ohif-network
+    restart: unless-stopped
+    # Aumentar límites para archivos DICOM grandes
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  # Nginx Proxy - Cache y proxy al PACS
+  nginx-proxy:
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile
+    image: us-east1-docker.pkg.dev/viewmed-web/viewmed-local-services/nginx-pacs-proxy:latest
+    container_name: nginx-proxy
+    ports:
+      - '8080:80'
+    networks:
+      - ohif-network
+    restart: unless-stopped
+    # Volumen para persistir el cache de nginx
+    volumes:
+      - nginx-cache:/var/cache/nginx
+    # Aumentar límites para archivos DICOM grandes
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+networks:
+  ohif-network:
+    driver: bridge
+
+volumes:
+  nginx-cache:

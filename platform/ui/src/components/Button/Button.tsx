@@ -128,11 +128,11 @@ Button.propTypes = {
   /** Callback to be called when the button is clicked  */
   onClick: PropTypes.func.isRequired,
   /** Button size  */
-  size: PropTypes.oneOf([ButtonEnums.size.medium, ButtonEnums.size.small]),
+  size: PropTypes.oneOf(['medium', 'small', 'smallTall']),
   /** Whether the button should be disabled  */
   disabled: PropTypes.bool,
   /** Button type  */
-  type: PropTypes.oneOf([ButtonEnums.type.primary, ButtonEnums.type.secondary]),
+  type: PropTypes.oneOf(['primary', 'secondary']),
   name: PropTypes.string,
   /** Button start icon name - if any icon is specified  */
   startIcon: PropTypes.node,

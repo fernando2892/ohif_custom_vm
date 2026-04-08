@@ -60,8 +60,11 @@ const wadorsRetriever = (
   seriesInstanceUID,
   sopInstanceUID,
   headers = DICOMWeb.getAuthorizationHeader(),
-  errorInterceptor = errorHandler.getHTTPErrorHandler()
+  errorInterceptor
 ) => {
+  if (errorInterceptor === undefined) {
+    errorInterceptor = errorHandler.getHTTPErrorHandler() || (() => {});
+  }
   const config = {
     url,
     headers,
@@ -69,11 +72,16 @@ const wadorsRetriever = (
   };
   const dicomWeb = new api.DICOMwebClient(config);
 
-  return dicomWeb.retrieveInstance({
-    studyInstanceUID,
-    seriesInstanceUID,
-    sopInstanceUID,
-  });
+  return dicomWeb
+    .retrieveInstance({
+      studyInstanceUID,
+      seriesInstanceUID,
+      sopInstanceUID,
+    })
+    .catch(error => {
+      console.warn('WADRS retrieveInstance error:', error.status || error.message);
+      return Promise.reject(error);
+    });
 };
 
 const getImageLoaderType = imageId => {
