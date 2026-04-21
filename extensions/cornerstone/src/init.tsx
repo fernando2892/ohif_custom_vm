@@ -269,28 +269,43 @@ export default async function init({
   eventTarget.addEventListener(EVENTS.IMAGE_LOAD_ERROR, imageLoadFailedHandler);
 
   // Tracking de progreso real de carga de imágenes DICOM por serie
-  const { incrementLoaded, incrementFailed, setSeriesTotal } =
-    useImageLoadProgressStore.getState();
+  const { incrementLoaded, incrementFailed, setSeriesTotal } = useImageLoadProgressStore.getState();
+
+  const parseSeriesUIDFromWadors = (imageId: string): string | undefined => {
+    if (!imageId?.startsWith('wadors:')) {
+      return;
+    }
+    try {
+      const stripped = imageId.split('/studies/')[1];
+      const parts = stripped?.split('/') ?? [];
+      // studies/{StudyUID}/series/{SeriesUID}/instances/...
+      return parts[2];
+    } catch {
+      return;
+    }
+  };
 
   const imageLoadedHandler = ({ detail }) => {
-    const imageId = detail?.image?.imageId;
+    const imageId = detail?.image?.imageId ?? detail?.imageId;
     if (!imageId) {
       return;
     }
     const seriesMeta = metaData.get('generalSeriesModule', imageId);
-    const seriesInstanceUID = seriesMeta?.seriesInstanceUID;
+    const seriesInstanceUID =
+      seriesMeta?.seriesInstanceUID ?? parseSeriesUIDFromWadors(imageId);
     if (seriesInstanceUID) {
       incrementLoaded(seriesInstanceUID);
     }
   };
 
   const imageLoadProgressFailedHandler = ({ detail }) => {
-    const imageId = detail?.imageId;
+    const imageId = detail?.imageId ?? detail?.image?.imageId;
     if (!imageId) {
       return;
     }
     const seriesMeta = metaData.get('generalSeriesModule', imageId);
-    const seriesInstanceUID = seriesMeta?.seriesInstanceUID;
+    const seriesInstanceUID =
+      seriesMeta?.seriesInstanceUID ?? parseSeriesUIDFromWadors(imageId);
     if (seriesInstanceUID) {
       incrementFailed(seriesInstanceUID);
     }
@@ -298,6 +313,19 @@ export default async function init({
 
   eventTarget.addEventListener(EVENTS.IMAGE_LOADED, imageLoadedHandler);
   eventTarget.addEventListener(EVENTS.IMAGE_LOAD_FAILED, imageLoadProgressFailedHandler);
+
+  // Registrar totales de series existentes al iniciar
+  const existingDisplaySets = displaySetService.getActiveDisplaySets();
+  existingDisplaySets?.forEach(ds => {
+    const seriesInstanceUID = ds.SeriesInstanceUID;
+    if (!seriesInstanceUID) {
+      return;
+    }
+    const totalFrames = ds.numImageFrames ?? ds.images?.length ?? ds.instances?.length ?? 0;
+    if (totalFrames > 0) {
+      setSeriesTotal(seriesInstanceUID, totalFrames);
+    }
+  });
 
   // Al agregar nuevos displaySets, registrar el total de frames esperados por serie
   displaySetService.subscribe(

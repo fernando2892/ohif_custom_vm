@@ -112,9 +112,9 @@ class StudyPrefetcherService extends PubSubService {
   private _imageIdsToDisplaySetsMap = new Map<string, Set<string>>();
   private config: StudyPrefetcherConfig = {
     /* Enable/disable study prefetching service */
-    enabled: false,
-    /* Number of displaysets to be prefetched */
-    displaySetsCount: 1,
+    enabled: true,
+    /* Number of displaysets to be prefetched — 999 = all series */
+    displaySetsCount: 999,
     /**
      * Max number of concurrent prefetch requests
      * High numbers may impact on the time to load a new dropped series because
@@ -586,11 +586,12 @@ class StudyPrefetcherService extends PubSubService {
       return;
     }
 
-    // Does not send any prefetch request until the active display sets are loaded
-    if (!this._areActiveDisplaySetsLoaded()) {
-      return;
-    }
-
+    // NOTE: Removed the _areActiveDisplaySetsLoaded() check to allow ALL series
+    // to start loading immediately when the study opens. The imageLoadPoolManager
+    // already handles priority — active viewport images (Interaction priority)
+    // are served first, while prefetch requests (Prefetch priority) fill in
+    // the remaining bandwidth. This gives a MedDream-like experience where
+    // all series load in parallel while the radiologist starts viewing.
     const { _pendingRequests: pendingRequests, _inflightRequests: inflightRequests } = this;
     const { maxNumPrefetchRequests } = this.config;
 

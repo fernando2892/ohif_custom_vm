@@ -488,7 +488,7 @@ function WorkList({
       onClick: () =>
         show({
           content: AboutModal,
-          title: AboutModal?.title ?? t('AboutModal:About OHIF Viewer'),
+          title: AboutModal?.title ?? t('AboutModal:About ViewMed'),
           containerClassName: AboutModal?.containerClassName ?? 'max-w-md',
         }),
     },

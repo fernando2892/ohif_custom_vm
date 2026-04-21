@@ -36,8 +36,9 @@ services:
     networks:
       - ohif-network
     restart: unless-stopped
-    # Volumen para persistir el cache de nginx
     volumes:
+      # Edita proxy/nginx.conf (upstream HTTPS / Host / SNI) sin reconstruir la imagen
+      - ./proxy/nginx.conf:/etc/nginx/nginx.conf:ro
       - nginx-cache:/var/cache/nginx
     # Aumentar límites para archivos DICOM grandes
     ulimits:

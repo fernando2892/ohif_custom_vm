@@ -1,5 +1,6 @@
 {
-  "About OHIF Viewer": "About OHIF Viewer",
+  "About ViewMed": "About ViewMed DICOM Viewer",
+  "About OHIF Viewer": "About ViewMed DICOM Viewer",
   "Browser": "Browser",
   "Build number": "Build Number",
   "Commit hash": "Commit hash",

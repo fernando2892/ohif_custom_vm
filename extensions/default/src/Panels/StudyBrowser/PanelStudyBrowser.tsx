@@ -1,4 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef, useSyncExternalStore, useMemo } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useSyncExternalStore,
+  useMemo,
+} from 'react';
 import { useImageViewer } from '@ohif/ui-next';
 import { useSystem, utils } from '@ohif/core';
 import { useNavigate } from 'react-router-dom';
@@ -16,7 +23,7 @@ const thumbnailNoImageModalities = ['SR', 'SEG', 'RTSTRUCT', 'RTPLAN', 'RTDOSE',
 // Helpers para suscribirse al store de progreso de carga de imágenes (extensión cornerstone)
 const _subscribeToImageProgress = (callback: () => void) => {
   const store = (window as any).imageLoadProgressStore;
-  return store ? store.subscribe(callback) : () => {};
+  return store ? store.subscribe(() => callback()) : () => {};
 };
 const _getImageProgressSnapshot = () => {
   const store = (window as any).imageLoadProgressStore;
@@ -567,7 +574,6 @@ function PanelStudyBrowser({
 
     let total = 0;
     let loaded = 0;
-    let hasAnyProgress = false;
 
     imagingDisplaySets.forEach(ds => {
       const seriesUID = ds.SeriesInstanceUID;
@@ -575,21 +581,19 @@ function PanelStudyBrowser({
       if (progress && progress.total > 0) {
         total += progress.total;
         loaded += progress.loaded + progress.failed;
-        hasAnyProgress = true;
       }
     });
 
-    // Fallback a conteo de thumbnails si el store aún no tiene datos
-    if (!hasAnyProgress) {
-      const totalDS = imagingDisplaySets.length;
-      const loadedDS = imagingDisplaySets.filter(
-        ds => thumbnailImageSrcMap[ds.displaySetInstanceUID] !== undefined
-      ).length;
+    // Si no hay datos de progreso de frames aún, mostrar 0% pero indicar que está cargando
+    // mientras el store se popula (los thumbnails NO son un indicador real de carga de imágenes)
+    if (total === 0) {
       return {
-        loadingProgress: totalDS > 0 ? Math.round((loadedDS / totalDS) * 100) : 0,
-        isLoading: totalDS > 0 && loadedDS < totalDS,
-        loadedFrames: loadedDS,
-        totalFrames: totalDS,
+        loadingProgress: 0,
+        isLoading: imagingDisplaySets.length > 0,
+        loadedFrames: 0,
+        totalFrames: imagingDisplaySets.reduce((sum, ds) => {
+          return sum + (ds.numImageFrames ?? ds.numInstances ?? 0);
+        }, 0),
       };
     }
 
@@ -600,7 +604,7 @@ function PanelStudyBrowser({
       loadedFrames: loaded,
       totalFrames: total,
     };
-  }, [displaySets, progressBySeriesUID, thumbnailImageSrcMap]);
+  }, [displaySets, progressBySeriesUID]);
 
   return (
     <>
@@ -774,6 +778,8 @@ function _mapDisplaySets(displaySets, displaySetLoadingState, thumbnailImageSrcM
         modality: ds.Modality,
         seriesDate: formatDate(ds.SeriesDate),
         numInstances: ds.numImageFrames ?? ds.instances?.length,
+        // Necesario para la barra de progreso (imageLoadProgressStore usa SeriesInstanceUID)
+        SeriesInstanceUID: ds.SeriesInstanceUID,
         loadingProgress,
         countIcon: ds.countIcon,
         messages: ds.messages,

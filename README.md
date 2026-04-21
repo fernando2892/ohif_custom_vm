@@ -244,6 +244,128 @@ also supports a number of commands that can be found in their respective
 \* - For more information on different builds, check out our [Deploy
 Docs][deployment-docs]
 
+## Developing with VIEWMED Proxy
+
+This project includes a caching nginx proxy that proxies to the VIEWMED PACS
+(`developer.viewmedonline.com`). The proxy caches DICOM frames and metadata to
+significantly reduce load times — similar to MedDream's behavior.
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) and Docker Compose installed
+- Node.js 20+ and Yarn 1.20+ (see [Requirements](#requirements))
+- Dependencies installed: `yarn install --frozen-lockfile`
+
+### Step 1 — Start the Nginx Proxy
+
+The proxy runs in Docker and handles all DICOMweb traffic with aggressive caching.
+
+```bash
+# Build and start only the proxy service
+docker compose up -d proxy
+
+# Verify it is healthy
+curl http://localhost:8080/health
+# Expected: "healthy"
+```
+
+The proxy listens on port `8080` and forwards requests to the VIEWMED PACS over HTTPS.
+Cache is persisted in the `nginx-cache` Docker volume.
+
+### Step 2 — Start OHIF in Development Mode
+
+With the proxy running, start the OHIF dev server:
+
+```bash
+# Set the VIEWMED config and start dev server
+APP_CONFIG=config/viewmed.js yarn dev
+```
+
+Or export the variable first:
+
+```bash
+export APP_CONFIG=config/viewmed.js
+yarn dev
+```
+
+The dev server starts at `http://localhost:3000`.
+
+### Step 3 — Verify the Setup
+
+1. Open `http://localhost:3000` in your browser
+2. The study list should load from the VIEWMED PACS
+3. Open a study — images should load progressively
+4. Check cache status in browser DevTools → Network tab:
+   - Look for `X-Cache-Status: HIT` on repeated requests
+   - First load = `MISS` (fetched from PACS)
+   - Second load = `HIT` (served from nginx cache)
+
+### Monitoring Cache Performance
+
+```bash
+# Watch nginx access logs with cache status
+docker compose logs -f proxy
+
+# Check cache size on disk
+docker exec nginx-proxy du -sh /var/cache/nginx/
+```
+
+### Stopping
+
+```bash
+# Stop OHIF dev server (Ctrl+C)
+
+# Stop the proxy
+docker compose stop proxy
+
+# Stop and remove containers
+docker compose down
+```
+
+### Rebuilding the Proxy Image
+
+If you modify `proxy/nginx.conf` or `proxy/Dockerfile`:
+
+```bash
+docker compose up -d --build proxy
+```
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Proxy returns 502 | Check `docker compose logs proxy` — PACS may be unreachable |
+| Images fail to load | Verify proxy is running: `curl http://localhost:8080/health` |
+| CORS errors | Ensure OHIF points to `http://localhost:8080` (not direct PACS URL) |
+| Cache not hitting | First access always misses; reload the same study to see HITs |
+| Port 8080 in use | Change the port in `docker-compose.yml` and update `wadoUriRoot`/`qidoRoot`/`wadoRoot` in `config/viewmed.js` |
+
+### Architecture
+
+```
+Browser (localhost:3000)
+  └── OHIF Dev Server
+        └── DICOMweb requests → http://localhost:8080/pacs/...
+              └── Nginx Proxy (cache + HTTPS → developer.viewmedonline.com)
+                    └── VIEWMED PACS (dcm4chee-arc)
+```
+
+Cache zones:
+- **metadata** (500MB, 30min TTL) — study/series metadata JSON
+- **dicom** (5GB, 1d TTL) — DICOM image frames
+- **studies** (50MB, 5min TTL) — study list queries
+
+### Quick Reference
+
+| Command | Purpose |
+|---------|---------|
+| `docker compose up -d proxy` | Start the caching proxy |
+| `APP_CONFIG=config/viewmed.js yarn dev` | Start OHIF dev server with proxy config |
+| `curl http://localhost:8080/health` | Verify proxy health |
+| `docker compose logs -f proxy` | Monitor cache hits/misses |
+| `docker compose up -d --build proxy` | Rebuild proxy after config changes |
+| `docker compose down` | Stop and remove all containers |
+
 ## Project
 
 The OHIF Medical Image Viewing Platform is maintained as a

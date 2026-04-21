@@ -13,20 +13,59 @@ window.config = {
   investigationalUseDialog: {
     option: 'never',
   },
-  // Optimizaciones de rendimiento
-  maxNumberOfWebWorkers: 6,
-  maxNumRequests: {
-    interaction: 100,
-    thumbnail: 75,
-    prefetch: 50,
+
+  // Logo personalizado ViewMed
+  whiteLabeling: {
+    createLogoComponentFn: function (React) {
+      return React.createElement(
+        'a',
+        {
+          href: '/',
+          target: '_self',
+          rel: 'noopener noreferrer',
+          className: 'inline-flex items-center',
+        },
+        React.createElement('img', {
+          src: './logo.png',
+          alt: 'ViewMed',
+          style: { height: '32px', width: 'auto' },
+        })
+      );
+    },
   },
-  // Configuración de precarga agresiva
+
+  // ============================================================
+  // Optimizaciones de rendimiento — balanceadas para proxy con cache
+  // ============================================================
+  //
+  // El proxy nginx cachea frames y metadata, pero saturarlo con
+  // requests excesivos degrada la experiencia para todos los usuarios.
+  // Estos valores priorizan la fluidez percibida sobre el throughput bruto.
+  // ============================================================
+  maxNumberOfWebWorkers: 4,
+  maxNumRequests: {
+    interaction: 20, // Scroll/interacción: suficiente para fluidez sin saturar
+    thumbnail: 15, // Thumbnails de la lista
+    prefetch: 10, // Prefetch en background controlado
+  },
+
+  // Lazy loading habilitado — carga series bajo demanda, no todas de golpe
+  // Esto reduce el tiempo inicial de "click a estudio → primera imagen"
+  enableStudyLazyLoad: true,
+
+  // Interleaved loading: carga desde el centro hacia afuera
+  // El usuario ve la imagen central primero (mejor percepción de velocidad)
+  interleaveCenter: true,
+
+  // Precarga de TODAS las series al abrir estudio
+  // Mientras el radiólogo ve la primera serie, las demás se cargan en background
   studyPrefetcher: {
     enabled: true,
-    displaySetsCount: 20,
-    maxNumPrefetchRequests: 30,
+    displaySetsCount: 999, // Todas las series (no solo 3)
+    maxNumPrefetchRequests: 10, // Máximo 10 requests simultáneos de prefetch
     order: 'downward',
   },
+
   // Handler de errores HTTP para evitar crashes
   httpErrorHandler: error => {
     // El error puede venir con diferentes estructuras
@@ -35,7 +74,6 @@ window.config = {
 
     // Silenciar errores comunes del PACS que no son críticos
     if (status === 404 || status === 410) {
-      // console.warn('[VIEWMED] Recurso no disponible:', url, 'Status:', status);
       return;
     }
     if (status === 403) {
@@ -45,6 +83,7 @@ window.config = {
     // Loguear errores HTTP pero no crashear
     console.warn('[VIEWMED] Error HTTP:', status, url);
   },
+
   defaultDataSourceName: 'viewmed',
   dataSources: [
     {
@@ -59,15 +98,11 @@ window.config = {
         wadoRoot: 'http://localhost:8080/pacs/aets/VIEWMED/rs',
         qidoSupportsIncludeField: true,
         imageRendering: 'wadors',
-        enableStudyLazyLoad: true,
         thumbnailRendering: 'wadors',
         supportsFuzzyMatching: true,
         supportsWildcard: true,
         dicomUploadEnabled: true,
-        singlepart: 'pdf,video',
-        bulkDataURI: {
-          enabled: true,
-        },
+        // No pedir singlepart — el PACS sirve multipart y el proxy lo cachea bien
         omitQuotationForMultipartRequest: true,
       },
     },
@@ -120,10 +155,7 @@ window.addEventListener(
     const reason = event.reason;
     const isXHRError =
       reason instanceof XMLHttpRequest ||
-      (reason &&
-        typeof reason === 'object' &&
-        'status' in reason &&
-        'statusText' in reason);
+      (reason && typeof reason === 'object' && 'status' in reason && 'statusText' in reason);
 
     if (isXHRError) {
       const status = reason.status;

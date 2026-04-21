@@ -4,7 +4,6 @@ import detect from 'browser-detect';
 import { useTranslation } from 'react-i18next';
 
 function AboutModalDefault() {
-  const { t } = useTranslation('AboutModal');
   const { os, version, name } = detect();
   const browser = `${name[0].toUpperCase()}${name.substr(1)} ${version}`;
   const versionNumber = process.env.VERSION_NUMBER;
@@ -14,24 +13,27 @@ function AboutModalDefault() {
 
   return (
     <AboutModal className="w-[400px]">
-      <AboutModal.ProductName>OHIF Viewer</AboutModal.ProductName>
+      <AboutModal.ProductName>Visor DICOM ViewMed</AboutModal.ProductName>
       <AboutModal.ProductVersion>{main}</AboutModal.ProductVersion>
       {beta && <AboutModal.ProductBeta>{beta}</AboutModal.ProductBeta>}
 
       <AboutModal.Body>
         <AboutModal.DetailItem
-          label={t('Commit Hash')}
+          label="Commit Hash"
           value={commitHash}
         />
         <AboutModal.DetailItem
-          label={t('Current Browser & OS')}
+          label="Navegador y SO"
           value={`${browser}, ${os}`}
         />
-        <AboutModal.SocialItem
-          icon="SocialGithub"
-          url="OHIF/Viewers"
-          text="github.com/OHIF/Viewers"
-        />
+        <a
+          href="https://www.viewmedonline.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary mt-2 inline-flex items-center text-lg hover:underline"
+        >
+          www.viewmedonline.com
+        </a>
       </AboutModal.Body>
     </AboutModal>
   );
