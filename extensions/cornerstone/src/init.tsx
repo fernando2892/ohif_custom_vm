@@ -328,21 +328,32 @@ export default async function init({
   });
 
   // Al agregar nuevos displaySets, registrar el total de frames esperados por serie
+  const processDisplaySets = (displaySets: any[]) => {
+    displaySets?.forEach(ds => {
+      const seriesInstanceUID = ds.SeriesInstanceUID;
+      if (!seriesInstanceUID) {
+        return;
+      }
+      const totalFrames = ds.numImageFrames ?? ds.images?.length ?? ds.instances?.length ?? 0;
+      if (totalFrames > 0) {
+        setSeriesTotal(seriesInstanceUID, totalFrames);
+      }
+    });
+  };
+
   displaySetService.subscribe(
     displaySetService.EVENTS.DISPLAY_SETS_ADDED,
-    ({ displaySetsAdded }) => {
-      displaySetsAdded?.forEach(ds => {
-        const seriesInstanceUID = ds.SeriesInstanceUID;
-        if (!seriesInstanceUID) {
-          return;
-        }
-        const totalFrames = ds.numImageFrames ?? ds.images?.length ?? ds.instances?.length ?? 0;
-        if (totalFrames > 0) {
-          setSeriesTotal(seriesInstanceUID, totalFrames);
-        }
-      });
-    }
+    ({ displaySetsAdded }) => processDisplaySets(displaySetsAdded)
   );
+  displaySetService.subscribe(
+    displaySetService.EVENTS.DISPLAY_SETS_CHANGED,
+    ({ displaySetsChanged }) => processDisplaySets(displaySetsChanged)
+  );
+
+  // También procesamos los display sets que ya existan por si se agregaron antes de esta suscripción
+  setTimeout(() => {
+    processDisplaySets(displaySetService.getActiveDisplaySets());
+  }, 100);
 
   const getDisplaySetFromVolumeId = (volumeId: string) => {
     const allDisplaySets = displaySetService.getActiveDisplaySets();

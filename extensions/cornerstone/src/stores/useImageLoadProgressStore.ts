@@ -8,6 +8,8 @@ type SeriesProgress = {
 
 type ImageLoadProgressState = {
   progressBySeriesUID: Record<string, SeriesProgress>;
+  globalLoaded: number;
+  globalFailed: number;
   setSeriesTotal: (seriesInstanceUID: string, total: number) => void;
   incrementLoaded: (seriesInstanceUID: string) => void;
   incrementFailed: (seriesInstanceUID: string) => void;
@@ -17,6 +19,8 @@ type ImageLoadProgressState = {
 
 export const useImageLoadProgressStore = create<ImageLoadProgressState>(set => ({
   progressBySeriesUID: {},
+  globalLoaded: 0,
+  globalFailed: 0,
 
   setSeriesTotal: (seriesInstanceUID, total) =>
     set(state => ({
@@ -45,6 +49,7 @@ export const useImageLoadProgressStore = create<ImageLoadProgressState>(set => (
             loaded: prev.loaded + 1,
           },
         },
+        globalLoaded: state.globalLoaded + 1,
       };
     }),
 
@@ -63,6 +68,7 @@ export const useImageLoadProgressStore = create<ImageLoadProgressState>(set => (
             failed: prev.failed + 1,
           },
         },
+        globalFailed: state.globalFailed + 1,
       };
     }),
 
@@ -73,5 +79,5 @@ export const useImageLoadProgressStore = create<ImageLoadProgressState>(set => (
       return { progressBySeriesUID: updated };
     }),
 
-  resetAll: () => set({ progressBySeriesUID: {} }),
+  resetAll: () => set({ progressBySeriesUID: {}, globalLoaded: 0, globalFailed: 0 }),
 }));

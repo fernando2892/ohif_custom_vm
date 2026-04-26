@@ -21,13 +21,113 @@ const { sortStudyInstances, formatDate, createStudyBrowserTabs } = utils;
 const thumbnailNoImageModalities = ['SR', 'SEG', 'RTSTRUCT', 'RTPLAN', 'RTDOSE', 'DOC', 'PMAP'];
 
 // Helpers para suscribirse al store de progreso de carga de imágenes (extensión cornerstone)
-const _subscribeToImageProgress = (callback: () => void) => {
-  const store = (window as any).imageLoadProgressStore;
-  return store ? store.subscribe(() => callback()) : () => {};
-};
 const _getImageProgressSnapshot = () => {
   const store = (window as any).imageLoadProgressStore;
-  return store ? store.getState().progressBySeriesUID : {};
+  return store ? store.getState() : { globalLoaded: 0, globalFailed: 0, progressBySeriesUID: {} };
+};
+
+function LoadingProgressIndicator({ displaySets }: { displaySets: any[] }) {
+  // Use a ref to store the latest subscribe function, or trigger a re-render if store becomes available
+  const [storeAvailable, setStoreAvailable] = React.useState(!!(window as any).imageLoadProgressStore);
+
+  React.useEffect(() => {
+    if (!storeAvailable) {
+      const interval = setInterval(() => {
+        if ((window as any).imageLoadProgressStore) {
+          setStoreAvailable(true);
+          clearInterval(interval);
+        }
+      }, 500);
+      return () => clearInterval(interval);
+    }
+  }, [storeAvailable]);
+
+  const subscribe = React.useCallback((callback: () => void) => {
+    const store = (window as any).imageLoadProgressStore;
+    return store ? store.subscribe(callback) : () => {};
+  }, [storeAvailable]);
+
+  const imageLoadState = useSyncExternalStore(
+    subscribe,
+    _getImageProgressSnapshot,
+    _getImageProgressSnapshot
+  );
+
+  const { loadingProgress, isLoading, loadedFrames, totalFrames } = useMemo(() => {
+    const imagingDisplaySets = (displaySets || []).filter(
+      ds => !thumbnailNoImageModalities.includes(ds.modality)
+    );
+
+    let total = 0;
+    imagingDisplaySets.forEach(ds => {
+      total += ds.numInstances || 0;
+    });
+
+    const loadedRaw = imageLoadState.globalLoaded + imageLoadState.globalFailed;
+    // Cap the loaded frames to not exceed the total, since globalLoaded tracks all frames across the app
+    const loaded = total > 0 ? Math.min(loadedRaw, total) : 0;
+
+    if (total === 0) {
+      return {
+        loadingProgress: 0,
+        isLoading: imagingDisplaySets.length > 0,
+        loadedFrames: 0,
+        totalFrames: imagingDisplaySets.reduce((sum, ds) => {
+          return sum + (ds.numImageFrames ?? ds.numInstances ?? 0);
+        }, 0),
+      };
+    }
+
+    const progress = total > 0 ? Math.round((loaded / total) * 100) : 0;
+    return {
+      loadingProgress: progress,
+      isLoading: total > 0 && loaded < total,
+      loadedFrames: loaded,
+      totalFrames: total,
+    };
+  }, [displaySets, imageLoadState]);
+
+  if (!isLoading && totalFrames > 0) {
+    return (
+      <div
+        className="loading-complete-indicator"
+        style={{
+          background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', // OHIF blue tones
+          color: 'white',
+          padding: '8px 16px',
+          margin: '8px',
+          borderRadius: '8px',
+          fontSize: '13px',
+          textAlign: 'center',
+          fontWeight: 600,
+        }}
+      >
+        {loadedFrames} de {totalFrames} imágenes cargadas
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="bg-primary-dark m-2 rounded-lg p-3 text-white shadow-lg">
+        <div className="mb-1 flex justify-between text-xs text-white">
+          <span>Cargando Imágenes...</span>
+          <span>{loadingProgress}%</span>
+        </div>
+        <div className="h-2 w-full overflow-hidden rounded-full bg-secondary-dark">
+          <div
+            className="h-full bg-primary-light transition-all duration-300 ease-out"
+            style={{ width: `${loadingProgress}%` }}
+          />
+        </div>
+        <div className="mt-1 text-center text-[10px] text-gray-400">
+          {loadedFrames} de {totalFrames} imágenes
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 };
 
 /**
@@ -561,51 +661,6 @@ function PanelStudyBrowser({
 
   const activeDisplaySetInstanceUIDs = viewports.get(activeViewportId)?.displaySetInstanceUIDs;
 
-  // Progreso real de carga de imágenes DICOM por serie (desde el store de la extensión cornerstone)
-  const progressBySeriesUID = useSyncExternalStore(
-    _subscribeToImageProgress,
-    _getImageProgressSnapshot
-  );
-
-  const { loadingProgress, isLoading, loadedFrames, totalFrames } = useMemo(() => {
-    const imagingDisplaySets = displaySets.filter(
-      ds => !thumbnailNoImageModalities.includes(ds.modality)
-    );
-
-    let total = 0;
-    let loaded = 0;
-
-    imagingDisplaySets.forEach(ds => {
-      const seriesUID = ds.SeriesInstanceUID;
-      const progress = seriesUID ? progressBySeriesUID[seriesUID] : null;
-      if (progress && progress.total > 0) {
-        total += progress.total;
-        loaded += progress.loaded + progress.failed;
-      }
-    });
-
-    // Si no hay datos de progreso de frames aún, mostrar 0% pero indicar que está cargando
-    // mientras el store se popula (los thumbnails NO son un indicador real de carga de imágenes)
-    if (total === 0) {
-      return {
-        loadingProgress: 0,
-        isLoading: imagingDisplaySets.length > 0,
-        loadedFrames: 0,
-        totalFrames: imagingDisplaySets.reduce((sum, ds) => {
-          return sum + (ds.numImageFrames ?? ds.numInstances ?? 0);
-        }, 0),
-      };
-    }
-
-    const progress = total > 0 ? Math.round((loaded / total) * 100) : 0;
-    return {
-      loadingProgress: progress,
-      isLoading: total > 0 && loaded < total,
-      loadedFrames: loaded,
-      totalFrames: total,
-    };
-  }, [displaySets, progressBySeriesUID]);
-
   return (
     <>
       <>
@@ -622,86 +677,7 @@ function PanelStudyBrowser({
         />
       </>
 
-      {/* INDICADOR DE PROGRESO DE CARGA */}
-      {isLoading && (
-        <div
-          className="loading-progress-indicator"
-          style={{
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            color: 'white',
-            padding: '10px 16px',
-            margin: '8px',
-            borderRadius: '8px',
-            fontSize: '13px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-            position: 'relative',
-            zIndex: 100,
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: '6px',
-              fontWeight: 600,
-            }}
-          >
-            <span>Cargando imágenes...</span>
-            <span>
-              {loadedFrames}/{totalFrames}
-            </span>
-          </div>
-          <div
-            style={{
-              width: '100%',
-              height: '6px',
-              background: 'rgba(255,255,255,0.3)',
-              borderRadius: '3px',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                width: `${loadingProgress}%`,
-                height: '100%',
-                background: '#fff',
-                borderRadius: '3px',
-                transition: 'width 0.3s ease',
-                boxShadow: '0 0 10px rgba(255,255,255,0.5)',
-              }}
-            />
-          </div>
-          <div
-            style={{
-              textAlign: 'center',
-              marginTop: '4px',
-              fontSize: '11px',
-              opacity: 0.9,
-            }}
-          >
-            {loadingProgress}%
-          </div>
-        </div>
-      )}
-
-      {!isLoading && totalFrames > 0 && (
-        <div
-          className="loading-complete-indicator"
-          style={{
-            background: 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)',
-            color: 'white',
-            padding: '8px 16px',
-            margin: '8px',
-            borderRadius: '8px',
-            fontSize: '13px',
-            textAlign: 'center',
-            fontWeight: 600,
-          }}
-        >
-          {loadedFrames} de {totalFrames} imágenes cargadas
-        </div>
-      )}
+      <LoadingProgressIndicator displaySets={displaySets} />
 
       <StudyBrowser
         tabs={tabs}

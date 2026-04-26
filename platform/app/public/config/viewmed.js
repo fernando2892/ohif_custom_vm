@@ -4,6 +4,9 @@ window.config = {
   showStudyList: true,
   extensions: [],
   modes: [],
+  customizationService: {
+    'studyBrowser.studyMode': 'primary',
+  },
   // Desactivar mensajes de advertencia
   showWarningMessageForCrossOrigin: false,
   showCPUFallbackMessage: false,
@@ -42,16 +45,17 @@ window.config = {
   // requests excesivos degrada la experiencia para todos los usuarios.
   // Estos valores priorizan la fluidez percibida sobre el throughput bruto.
   // ============================================================
-  maxNumberOfWebWorkers: 4,
+  maxNumberOfWebWorkers: typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4,
   maxNumRequests: {
-    interaction: 20, // Scroll/interacción: suficiente para fluidez sin saturar
+    interaction: 30, // Aumentado para prioridad en estudios grandes
     thumbnail: 15, // Thumbnails de la lista
-    prefetch: 10, // Prefetch en background controlado
+    prefetch: 15, // Prefetch en background un poco más agresivo
   },
 
   // Lazy loading habilitado — carga series bajo demanda, no todas de golpe
   // Esto reduce el tiempo inicial de "click a estudio → primera imagen"
-  enableStudyLazyLoad: true,
+  // Carga toda la metadata al inicio para que el prefetcher pueda descargar todo el estudio
+  enableStudyLazyLoad: false,
 
   // Interleaved loading: carga desde el centro hacia afuera
   // El usuario ve la imagen central primero (mejor percepción de velocidad)
@@ -62,8 +66,8 @@ window.config = {
   studyPrefetcher: {
     enabled: true,
     displaySetsCount: 999, // Todas las series (no solo 3)
-    maxNumPrefetchRequests: 10, // Máximo 10 requests simultáneos de prefetch
-    order: 'downward',
+    maxNumPrefetchRequests: 15, // Aumentado para mayor velocidad de descarga en segundo plano
+    order: 'closest',
   },
 
   // Handler de errores HTTP para evitar crashes
@@ -122,7 +126,7 @@ window.config = {
       },
     },
   ],
-  studyListFunctionsEnabled: true,
+  studyListFunctionsEnabled: false,
 };
 
 // Filtrar mensajes ERMF ruidosos de Cornerstone3D.
