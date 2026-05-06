@@ -321,7 +321,7 @@ export default async function init({
     if (!seriesInstanceUID) {
       return;
     }
-    const totalFrames = ds.numImageFrames ?? ds.images?.length ?? ds.instances?.length ?? 0;
+    const totalFrames = Number(ds.numImageFrames ?? ds.images?.length ?? ds.instances?.length ?? 0);
     if (totalFrames > 0) {
       setSeriesTotal(seriesInstanceUID, totalFrames);
     }
@@ -334,7 +334,7 @@ export default async function init({
       if (!seriesInstanceUID) {
         return;
       }
-      const totalFrames = ds.numImageFrames ?? ds.images?.length ?? ds.instances?.length ?? 0;
+      const totalFrames = Number(ds.numImageFrames ?? ds.images?.length ?? ds.instances?.length ?? 0);
       if (totalFrames > 0) {
         setSeriesTotal(seriesInstanceUID, totalFrames);
       }

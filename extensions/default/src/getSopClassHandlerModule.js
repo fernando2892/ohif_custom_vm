@@ -201,7 +201,7 @@ function getDisplaySetsFromSeries(instances) {
       displaySet = makeDisplaySet([instance], instanceIndex);
       displaySet.setAttributes({
         sopClassUids,
-        numImageFrames: instance.NumberOfFrames,
+        numImageFrames: Number(instance.NumberOfFrames),
         instanceNumber: instance.InstanceNumber,
         acquisitionDatetime: instance.AcquisitionDateTime,
       });

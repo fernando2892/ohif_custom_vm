@@ -60,7 +60,7 @@ function LoadingProgressIndicator({ displaySets }: { displaySets: any[] }) {
 
     let total = 0;
     imagingDisplaySets.forEach(ds => {
-      total += ds.numInstances || 0;
+      total += Number(ds.numInstances) || 0;
     });
 
     const loadedRaw = imageLoadState.globalLoaded + imageLoadState.globalFailed;
@@ -753,7 +753,7 @@ function _mapDisplaySets(displaySets, displaySetLoadingState, thumbnailImageSrcM
         seriesNumber: ds.SeriesNumber,
         modality: ds.Modality,
         seriesDate: formatDate(ds.SeriesDate),
-        numInstances: ds.numImageFrames ?? ds.instances?.length,
+        numInstances: Number(ds.numImageFrames ?? ds.instances?.length),
         // Necesario para la barra de progreso (imageLoadProgressStore usa SeriesInstanceUID)
         SeriesInstanceUID: ds.SeriesInstanceUID,
         loadingProgress,
